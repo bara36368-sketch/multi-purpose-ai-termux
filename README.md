@@ -28,6 +28,13 @@ python cyberdeck.py up          # status table of all 8 modules
 python cyberdeck.py doctor      # run every module's test suite
 python cyberdeck.py task "make me a reel from my vlog"
                                 # natural-language dispatch -> clip-factory (--llm for phone classification)
+python cyberdeck.py task "summarize the meeting" --run
+                                # execute the resolved command; journaled to ~/.cyberdeck/sessions.json
+python cyberdeck.py sessions    # recent runs (--status done|failed)
+python cyberdeck.py redo 3      # re-run a finished session
+python cyberdeck.py fleet add g85 http://192.168.1.50:8000 --key sk-x
+python cyberdeck.py fleet status --once    # one-shot health table
+python cyberdeck.py fleet status           # live watch: up/down flips, model swaps, thermal spikes
 python cyberdeck.py link <srt|url>   # video-brain pipeline plan
 ```
 

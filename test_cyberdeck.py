@@ -67,8 +67,8 @@ def test_cmd_task_llm_fallback(monkeypatch):
         raise RuntimeError("phone down")
 
     monkeypatch.setattr(cd, "llm_classify", boom)
-    import io
-    code = cd.cmd_task(type("A", (), {"prompt": "make a short", "llm": True}), {})
+    code = cd.cmd_task(type("A", (), {"prompt": "make a short", "llm": True,
+                                      "run": False, "timeout": 10}), {})
     assert code == 0  # falls back to keywords
 
 
@@ -102,3 +102,113 @@ def test_doctor_marks_failure(monkeypatch):
     monkeypatch.setattr(cd, "has_tests", lambda m: True)
     results = cd.run_tests(type("A", (), {"timeout": 120})())
     assert any(r["status"] == "FAIL" for r in results)
+
+
+# ------------------------------------------------------------------ sessions
+
+def test_session_journal(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "SESSIONS_PATH", str(tmp_path / "sessions.json"))
+    s = cd.add_session("make a short", "video", "clip-factory", "echo hi")
+    assert s["id"] == 1 and s["status"] == "running"
+    cd.update_session(s, status="done", exit_code=0, duration_ms=10)
+    loaded = cd.load_sessions()
+    assert len(loaded) == 1
+    assert loaded[0]["status"] == "done"
+    s2 = cd.add_session("battery", "phone", "android-mcp", "echo bye")
+    assert s2["id"] == 2  # monotonic ids
+
+
+def test_session_persists_across_load(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "SESSIONS_PATH", str(tmp_path / "s.json"))
+    cd.add_session("p", "learn", "video-brain", "true")
+    assert cd.load_sessions()[0]["prompt"] == "p"
+
+
+def test_has_placeholders():
+    assert cd.has_placeholders('python clip-factory/pipeline.py "topic"')
+    assert not cd.has_placeholders("python bench/runner.py --model x")
+
+
+def test_run_command_ok_and_fail():
+    rc, out = cd.run_command("echo hello", timeout=10)
+    assert rc == 0 and "hello" in out
+    rc, _ = cd.run_command("python -c \"import sys; sys.exit(3)\"", timeout=10)
+    assert rc == 3
+
+
+def test_redo_refuses_placeholder_session(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cd, "SESSIONS_PATH", str(tmp_path / "s.json"))
+    cd.add_session("p", "video", "clip-factory", 'python pipeline.py "topic"')
+    assert cd.cmd_redo(type("A", (), {"id": 1, "timeout": 10})) == 3
+    assert "refusing" in capsys.readouterr().out
+
+
+def test_task_run_records_session(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "SESSIONS_PATH", str(tmp_path / "s.json"))
+    monkeypatch.setattr(cd, "classify_intent",
+                        lambda p: ("test", "shared", "echo task-ok"))
+    code = cd.cmd_task(type("A", (), {"prompt": "go", "llm": False, "run": True, "timeout": 10}))
+    assert code == 0
+    s = cd.load_sessions()[0]
+    assert s["status"] == "done" and s["exit_code"] == 0
+    assert "task-ok" in s["output_tail"]
+
+
+# ------------------------------------------------------------------ fleet
+
+def test_fleet_defaults_to_local(monkeypatch):
+    monkeypatch.setattr(cd, "FLEET_PATH", str(monkeypatch_fail_path()))
+    env = {"ANDROIDLLM_URL": "http://10.0.0.5:9000"}
+    fleet = cd.load_fleet(env)
+    assert fleet == [{"name": "local", "url": "http://10.0.0.5:9000", "key": ""}]
+
+
+def monkeypatch_fail_path():
+    import tempfile
+    return os.path.join(tempfile.gettempdir(), "cyberdeck_nonexistent_fleet.json")
+
+
+def test_fleet_load_and_add(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "FLEET_PATH", str(tmp_path / "fleet.json"))
+    assert cd.load_fleet() == [{"name": "local", "url": "http://127.0.0.1:8000", "key": ""}]
+    cd.cmd_fleet(type("A", (), {"fleet_cmd": "add", "name": "g85",
+                                "url": "http://10.0.0.5:8000", "key": "sk-x"}), {})
+    fleet = cd.load_fleet()
+    assert fleet[-1] == {"name": "g85", "url": "http://10.0.0.5:8000", "key": "sk-x"}
+    assert fleet[0]["name"] == "local"  # add appends, never drops existing
+
+
+def test_probe_phone_up_and_down(monkeypatch):
+    import json as _json
+
+    def fake_urlopen(req, timeout=None):
+        if "downhost" in req.full_url:
+            raise OSError("connection refused")
+        body = _json.dumps({"model": "qwen3-4b", "ram_gb": 8}).encode()
+
+        class R:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return body
+
+        return R()
+
+    monkeypatch.setattr(urllib_request(), "urlopen", fake_urlopen)
+    up = cd.probe_phone({"name": "g85", "url": "http://up:8000"})
+    assert up["status"] == "UP" and up["model"] == "qwen3-4b" and up["latency_ms"] >= 0
+    down = cd.probe_phone({"name": "old", "url": "http://downhost:8000"})
+    assert down["status"] == "DOWN"
+
+
+def test_fleet_alerts_detect_changes():
+    prev = [{"name": "g85", "status": "UP", "model": "qwen3-4b"}]
+    cur = [{"name": "g85", "status": "UP", "model": "qwen3-8b"}]
+    assert any("model swapped" in a for a in cd.fleet_alerts(prev, cur))
+    cur2 = [{"name": "g85", "status": "DOWN", "error": "x"}]
+    assert any("UP -> DOWN" in a for a in cd.fleet_alerts(prev, cur2))
+    assert cd.fleet_alerts(prev, prev) == []
