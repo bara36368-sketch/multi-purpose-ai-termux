@@ -12,7 +12,12 @@ Usage:
 ask a reachable androidllm phone to classify the intent instead, with the
 keyword matcher as fallback (ANDROIDLLM_URL env var or http://127.0.0.1:8000).
 
-Imports: stdlib only. Python 3.8+.
+Intent dispatch, placeholder refusal, session ids/tails and fleet alert
+detection run through the PyO3 extension `cyberdeck_rs` when built
+(cd cyberdeck-rs && maturin build; pip install the wheel) with pure-Python
+fallbacks otherwise — the CLI never hard-depends on a Rust build.
+
+Imports: stdlib only (cyberdeck_rs optional). Python 3.8+.
 """
 import argparse
 import json
@@ -27,6 +32,24 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 CYBER_HOME = os.path.join(os.path.expanduser("~"), ".cyberdeck")
 SESSIONS_PATH = os.path.join(CYBER_HOME, "sessions.json")
 FLEET_PATH = os.path.join(CYBER_HOME, "fleet.json")
+
+
+def _load_rs():
+    try:
+        import cyberdeck_rs  # noqa: F401
+        return sys.modules["cyberdeck_rs"]
+    except ImportError:
+        pass
+    try:
+        sys.path.insert(0, os.path.join(REPO, "cyberdeck-rs"))
+        import cyberdeck_rs  # noqa: F401
+        return sys.modules["cyberdeck_rs"]
+    except ImportError:
+        return None
+
+
+_RS = _load_rs()
+_HAS_RS = _RS is not None
 
 MODULES = [
     {"dir": "gateway", "entry": "gateway.py", "what": "multi-channel agent gateway (router + telegram)"},
@@ -109,6 +132,7 @@ def cmd_up(args):
     print()
     print("engine-rs release build: %s" % ("present" if os.path.isdir(rust) else "not built yet (cd engine-rs && cargo build --release)"))
     print("engine_rs.pyd importable: %s" % _pyd_importable())
+    print("cyberdeck_rs importable:  %s" % ("yes" if _HAS_RS else "no (cd cyberdeck-rs && maturin build; pip install the wheel)"))
 
 
 def _pyd_importable():
@@ -167,13 +191,21 @@ def cmd_doctor(args, env=None):
 
 # ------------------------------------------------------------------ task
 
-def classify_intent(prompt):
-    """Keyword dispatch over INTENTS. Returns (intent_name, module, command) or None."""
+def _py_classify_intent(prompt):
+    """Pure-Python reference for classify_intent (parity-checked against Rust)."""
     text = prompt.lower()
     for name, keywords, module, command in INTENTS:
         if any(k.lower() in text for k in keywords):
             return name, module, command
     return None
+
+
+def classify_intent(prompt):
+    """Keyword dispatch over INTENTS. Returns (intent_name, module, command) or None."""
+    if _HAS_RS:
+        r = _RS.classify_intent(prompt, INTENTS)
+        return tuple(r) if r else None
+    return _py_classify_intent(prompt)
 
 
 def llm_classify(prompt, env=None, timeout=10.0):
@@ -284,7 +316,7 @@ def save_sessions(sessions):
 
 def add_session(prompt, intent, module, command):
     sessions = load_sessions()
-    sid = (sessions[-1]["id"] + 1) if sessions else 1
+    sid = _RS.next_id(sessions) if _HAS_RS else ((sessions[-1]["id"] + 1) if sessions else 1)
     session = {
         "id": sid,
         "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
@@ -312,10 +344,29 @@ def update_session(session, **fields):
     session.update(fields)
 
 
+def _py_has_placeholders(command):
+    """Pure-Python reference for has_placeholders."""
+    return '"' in command or "<" in command or ">" in command
+
+
 def has_placeholders(command):
     """Templates embed placeholders as \"topic\" or <...> — neither is safe
     to execute verbatim."""
-    return '"' in command or "<" in command or ">" in command
+    if _HAS_RS:
+        return _RS.has_placeholders(command)
+    return _py_has_placeholders(command)
+
+
+def _py_tail(text, max_chars=1200):
+    """Pure-Python reference for _tail (raw tail, no stripping — matches Rust)."""
+    return "" if max_chars == 0 else text[-max_chars:]
+
+
+def _tail(text, max_chars=1200):
+    """Last max_chars characters, char-boundary safe."""
+    if _HAS_RS:
+        return _RS.tail(text, max_chars)
+    return _py_tail(text, max_chars)
 
 
 def run_command(command, timeout=300):
@@ -367,7 +418,7 @@ def cmd_task(args, env=None):
     status = "done" if rc == 0 else ("timedout" if rc == 124 else "failed")
     update_session(session, status=status, exit_code=rc,
                    duration_ms=int((time.monotonic() - t0) * 1000),
-                   output_tail=output.strip()[-1200:])
+                   output_tail=_tail(output))
     print("status:  %s (exit %s)" % (status, rc))
     tail = output.strip()
     if tail:
@@ -409,7 +460,8 @@ def cmd_redo(args):
     rc, output = run_command(src["command"], timeout=args.timeout)
     status = "done" if rc == 0 else ("timedout" if rc == 124 else "failed")
     update_session(session, status=status, exit_code=rc,
-                   duration_ms=int((time.monotonic() - t0) * 1000))
+                   duration_ms=int((time.monotonic() - t0) * 1000),
+                   output_tail=_tail(output))
     print("status:  %s (exit %s)" % (status, rc))
     tail = output.strip()
     if tail:
@@ -473,8 +525,8 @@ def fmt_row(h, color):
     return "%s%s%s DOWN  %s" % (color, name, reset, h.get("error", ""))
 
 
-def fleet_alerts(prev, cur):
-    """State-change lines: up/down flips, model swaps, thermal spikes."""
+def _py_fleet_alerts(prev, cur):
+    """Pure-Python reference for fleet_alerts."""
     out = []
     p = {h["name"]: h for h in prev}
     for h in cur:
@@ -490,6 +542,13 @@ def fleet_alerts(prev, cur):
             if om and nm and om != nm:
                 out.append("ALERT %s: model swapped %s -> %s" % (h["name"], om, nm))
     return out
+
+
+def fleet_alerts(prev, cur):
+    """State-change lines: up/down flips, model swaps, thermal spikes."""
+    if _HAS_RS:
+        return list(_RS.fleet_alerts(prev, cur))
+    return _py_fleet_alerts(prev, cur)
 
 
 def cmd_fleet(args, env=None):

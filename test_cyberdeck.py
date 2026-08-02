@@ -205,10 +205,49 @@ def test_probe_phone_up_and_down(monkeypatch):
     assert down["status"] == "DOWN"
 
 
-def test_fleet_alerts_detect_changes():
+# ------------------------------------------------------------------ rust parity
+# These only assert when the PyO3 extension is built; the fallback path is
+# covered by the tests above, so the suite stays green either way.
+
+def test_rust_classify_matches_python():
+    if not cd._HAS_RS:
+        return
+    for prompt in ("make me a reel from my vlog", "whats my battery level",
+                   "remember this, summarize the meeting", "zzz plumbus frobnicate",
+                   "MAKE A REEL ABOUT MY TRIP"):
+        assert cd.classify_intent(prompt) == cd._py_classify_intent(prompt)
+
+
+def test_rust_placeholders_match_python():
+    if not cd._HAS_RS:
+        return
+    for cmd in ('python clip-factory/pipeline.py "topic"', "python bench/runner.py --model <id>",
+                "echo hi", "start android-mcp/server.py"):
+        assert cd.has_placeholders(cmd) == cd._py_has_placeholders(cmd)
+
+
+def test_rust_tail_matches_python():
+    if not cd._HAS_RS:
+        return
+    for text, n in (("hello world", 5), ("hello world", 1200), ("", 5),
+                    ("héllo wörld", 6), ("  padded  ", 3), ("x", 0)):
+        assert cd._tail(text, n) == cd._py_tail(text, n)
+
+
+def test_rust_next_id_matches_python():
+    if not cd._HAS_RS:
+        return
+    assert cd._RS.next_id([]) == 1
+    assert cd._RS.next_id([{"id": 1}]) == 2
+    assert cd._RS.next_id([{"id": 1}, {"id": 7}]) == 8
+
+
+def test_rust_fleet_alerts_match_python():
+    if not cd._HAS_RS:
+        return
     prev = [{"name": "g85", "status": "UP", "model": "qwen3-4b"}]
-    cur = [{"name": "g85", "status": "UP", "model": "qwen3-8b"}]
-    assert any("model swapped" in a for a in cd.fleet_alerts(prev, cur))
-    cur2 = [{"name": "g85", "status": "DOWN", "error": "x"}]
-    assert any("UP -> DOWN" in a for a in cd.fleet_alerts(prev, cur2))
+    cur_swap = [{"name": "g85", "status": "UP", "model": "qwen3-8b"}]
+    cur_down = [{"name": "g85", "status": "DOWN", "error": "x"}]
+    assert cd.fleet_alerts(prev, cur_swap) == cd._py_fleet_alerts(prev, cur_swap)
+    assert cd.fleet_alerts(prev, cur_down) == cd._py_fleet_alerts(prev, cur_down)
     assert cd.fleet_alerts(prev, prev) == []

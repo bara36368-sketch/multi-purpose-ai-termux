@@ -38,6 +38,17 @@ python cyberdeck.py fleet status           # live watch: up/down flips, model sw
 python cyberdeck.py link <srt|url>   # video-brain pipeline plan
 ```
 
+### Rust fast path (optional)
+
+Intent dispatch, placeholder refusal, session ids/tails and fleet alert
+detection run through the `cyberdeck-rs` PyO3 extension when built; the CLI
+falls back to pure Python otherwise (no hard dependency).
+
+```
+cd cyberdeck-rs && maturin build --release && pip install target/wheels/*.whl
+python -c "import cyberdeck as cd; print(cd._HAS_RS)"   # -> True
+```
+
 ## Layout conventions
 
 - Each module is self-contained: own README, own deps, own tests, no

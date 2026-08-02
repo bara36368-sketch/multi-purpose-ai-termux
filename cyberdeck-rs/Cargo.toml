@@ -1,0 +1,16 @@
+[package]
+name = "cyberdeck_rs"
+version = "0.1.0"
+edition = "2021"
+description = "PyO3 fast path for the cyberdeck orchestrator: intent dispatch, session journal helpers, fleet alert detection"
+
+[lib]
+name = "cyberdeck_rs"
+crate-type = ["cdylib"]
+
+[dependencies]
+pyo3 = { version = "0.26", features = ["abi3-py39", "extension-module"] }
+
+[features]
+default = ["extension-module"]
+extension-module = ["pyo3/extension-module"]
