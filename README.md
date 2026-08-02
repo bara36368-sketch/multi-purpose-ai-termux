@@ -21,6 +21,16 @@ both proven on real hardware (4 GB RAM, Helio G85, Termux).
 | `video-brain/` | Video → knowledge | working | SRT index → timestamped cited answers |
 | `engine-rs/` | Rust engine hot path | working | PyO3 sampling, bit-equal to numpy (abi3) |
 
+## Quick start
+
+```
+python cyberdeck.py up          # status table of all 8 modules
+python cyberdeck.py doctor      # run every module's test suite
+python cyberdeck.py task "make me a reel from my vlog"
+                                # natural-language dispatch -> clip-factory (--llm for phone classification)
+python cyberdeck.py link <srt|url>   # video-brain pipeline plan
+```
+
 ## Layout conventions
 
 - Each module is self-contained: own README, own deps, own tests, no
