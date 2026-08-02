@@ -1,4 +1,4 @@
-# Cyberdeck
+# Multi-Purpose AI Termux
 
 One repo, eight modules — a personal AI stack that turns an Android phone
 into a 24/7 self-hosted server and uses it for everything: chat gateway,
