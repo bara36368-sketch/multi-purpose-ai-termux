@@ -12,14 +12,14 @@ both proven on real hardware (4 GB RAM, Helio G85, Termux).
 
 | Folder | Module | Status | What it is |
 |---|---|---|---|
-| `gateway/` | Personal agent gateway | scaffold | Multi-channel (Telegram/WhatsApp/Slack/Discord/Signal) agent with androidllm as offline fallback |
-| `phone-server/` | Termux deploy kit | scaffold | One `curl \| bash` to turn any Android phone into a 24/7 AI server |
-| `bench/` | On-device model leaderboard | scaffold | CI-measured tok/s, tokens/W, thermals per SoC and model tier |
-| `clip-factory/` | CapCut automation | scaffold | Script → TTS → subtitles → VectCut draft → batch Shorts/Reels |
-| `agent-brain/` | Agent memory layer | scaffold | Sessions → entity knowledge graph → cited answers with gap analysis |
-| `android-mcp/` | Android MCP server | scaffold | Expose phone capabilities (SMS, battery, GPS, TTS) as MCP tools |
-| `video-brain/` | Video → knowledge | scaffold | YouTube/podcast/screen-record → transcript → searchable personal brain |
-| `engine-rs/` | Rust engine hot path | scaffold | Lean Rust rewrite of the inference hot path (PyO3, bit-equal) |
+| `gateway/` | Personal agent gateway | working | Multi-channel agent with androidllm as offline fallback (Router + Telegram channel) |
+| `phone-server/` | Termux deploy kit | working | install.sh / run.sh / monitor.sh: 24/7 server + OOM ladder |
+| `bench/` | On-device model leaderboard | working | tok/s, tok/J, thermals per SoC; GitHub Pages CI |
+| `clip-factory/` | CapCut automation | working | Script → edit plan → SRT → captions → VectCut draft |
+| `agent-brain/` | Agent memory layer | working | Sessions → entity graph → cited answers + gap analysis |
+| `android-mcp/` | Android MCP server | working | Phone capabilities as MCP tools (stdio + HTTP) |
+| `video-brain/` | Video → knowledge | working | SRT index → timestamped cited answers |
+| `engine-rs/` | Rust engine hot path | working | PyO3 sampling, bit-equal to numpy (abi3) |
 
 ## Layout conventions
 

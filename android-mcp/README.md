@@ -29,5 +29,7 @@ android-mcp/
 
 ## Status
 
-Scaffold — first milestone: `battery`, `sms_send`, `clipboard_get`, `tts_say`
-over stdio, verified with the reference MCP client.
+Working — milestone 1 done: stdio + HTTP transports, JSON-RPC 2.0/MCP
+handshake, tools (`battery`, `sms_send`, `clipboard_get`, `tts_say`,
+`thermal`, `device_info`), permissions gate, tests 8/8. Termux-API calls
+verified only on-device so far.

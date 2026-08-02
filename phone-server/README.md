@@ -33,5 +33,6 @@ phone-server/
 
 ## Status
 
-Scaffold — first milestone: `install.sh` that provisions androidllm + bot +
-runner on a clean Termux and self-tests with `/health`.
+Working — milestone 1 done: `install.sh` (idempotent Termux bootstrap),
+`run.sh` (watchdog supervisor with backoff), `monitor.sh` (health check +
+OOM downgrade ladder). Not yet exercised on-device — needs a Termux phone run.

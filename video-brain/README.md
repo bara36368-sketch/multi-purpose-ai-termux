@@ -31,5 +31,6 @@ video-brain/
 
 ## Status
 
-Scaffold — first milestone: fetch a YouTube URL, transcribe on-device,
-answer "what did they say about X" with a clickable timestamp.
+Working — milestone 1 done: SRT/VTT passthrough, chunking + timestamped
+inverted index, `ask.py` with cited answers, tests 5/5 (offline, no
+network). yt-dlp/whisper wiring needs an on-device run.

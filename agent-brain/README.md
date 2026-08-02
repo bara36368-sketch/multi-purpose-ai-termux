@@ -29,5 +29,6 @@ agent-brain/
 
 ## Status
 
-Scaffold — first milestone: ingest Telegram sessions, answer "who/what/when"
-questions with citations, measure P@5 against a small eval set.
+Working — milestone 1 done: `ingest.py` (NDJSON/text), `graph.py` (zero-LLM
+entity edges), `retrieve.py` (hybrid score + P@5), `answer.py` (CLI with
+citations + gaps), tests 6/6.

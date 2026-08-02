@@ -1,0 +1,4 @@
+{
+  "allowed": ["battery", "thermal", "device_info"],
+  "denied": []
+}

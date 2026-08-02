@@ -30,5 +30,6 @@ clip-factory/
 
 ## Status
 
-Scaffold — first milestone: script → TTS → SRT → VectCut draft with captions,
-end-to-end on one Short.
+Working — milestone 1 done: `director.py` (deterministic edit plans),
+`subtitles.py` (SRT in/out), `pipeline.py` (offline draft + VectCut cloud
+mode), tests 6/6. TTS wiring is the next step.

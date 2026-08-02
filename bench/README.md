@@ -30,5 +30,6 @@ bench/
 
 ## Status
 
-Scaffold — first milestone: `runner.py` producing a JSON report for one model
-on the G85, with a `tokens per watt` figure from battery capacity deltas.
+Working — milestone 1 done: `runner.py` (stream/non-stream, JSON report),
+`metrics.py` (tok/s, tok/J, temp delta), device profiles, GitHub Pages
+workflow. Tests 6/6. On-device numbers pending a G85 run.

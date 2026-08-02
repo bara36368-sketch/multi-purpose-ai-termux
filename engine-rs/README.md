@@ -33,5 +33,14 @@ engine-rs/
 
 ## Status
 
-Scaffold — first milestone: layer forward + sampling moved in from
-`androidllm_rs`, bit-equality tests green on x86 and aarch64.
+Working — milestone 1 done: seeded top-p/min-p/top-k sampling with
+temperature, exposed via PyO3. Bit-equal to the numpy reference
+(`tests/test_sampling.py`, 5/5 green on Python 3.14 + Rust 1.97).
+
+## Build
+
+```
+pip install maturin        # or: cargo build --release && copy the cdylib as engine_rs.pyd
+maturin develop            # builds + installs into the active venv
+python -m pytest tests -q  # bit-equality suite
+```

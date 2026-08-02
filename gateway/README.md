@@ -31,7 +31,9 @@ gateway/
 
 ## Status
 
-Scaffold — roadmap:
+Working — milestone 1 done: Router (cloud→androidllm fallback with health cache), OpenAI-compatible providers, Telegram channel, CLI. Tests 5/5.
+
+Roadmap:
 1. Telegram channel + androidllm fallback (reuse `opencode-server-bot` knowledge)
 2. WhatsApp channel
 3. Slack/Discord/Signal

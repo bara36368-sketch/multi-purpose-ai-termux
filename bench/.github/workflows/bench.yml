@@ -1,0 +1,68 @@
+name: bench
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 3 * * 1"  # weekly Monday 03:00 UTC
+
+jobs:
+  bench:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Run metrics unit tests
+        run: python -m pytest bench -q
+
+      # Real device benchmarks run on-device (Android/Termux), not in CI.
+      # This job publishes results.json from the last phone-side run, so the
+      # leaderboard stays fresh when maintainers upload device reports.
+      - name: Build leaderboard page
+        run: |
+          mkdir -p public
+          python - <<'PY'
+          import json, os, glob
+          rows = []
+          for f in glob.glob("bench/results/*.json"):
+              try:
+                  d = json.load(open(f))
+                  rows.append(d)
+              except Exception:
+                  pass
+          rows.sort(key=lambda d: d.get("tokens_per_sec", 0), reverse=True)
+          os.makedirs("public", exist_ok=True)
+          with open("public/index.html", "w") as out:
+              out.write("<html><head><meta charset='utf-8'><title>androidllm bench</title>")
+              out.write("<style>body{font-family:system-ui;margin:2rem}table{border-collapse:collapse}"
+                        "td,th{border:1px solid #ccc;padding:.4rem .8rem}</style></head><body>")
+              out.write("<h1>On-device leaderboard</h1><table><tr><th>model</th><th>device</th>"
+                        "<th>tok/s</th><th>tok/J</th><th>temp delta °C</th></tr>")
+              for r in rows:
+                  out.write(f"<tr><td>{r.get('model')}</td><td>{r.get('device')}</td>"
+                            f"<td>{r.get('tokens_per_sec')}</td><td>{r.get('tokens_per_joule')}</td>"
+                            f"<td>{r.get('temp_delta_c')}</td></tr>")
+              out.write("</table></body></html>")
+              print(f"leaderboard rows: {len(rows)}")
+          PY
+          cp -r public /tmp/public 2>/dev/null || true
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy:
+    needs: bench
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

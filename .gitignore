@@ -36,3 +36,7 @@ Thumbs.db
 # benchmarks artifacts
 bench/results/*.json
 bench/results/*.png
+
+# engine-rs build artifacts
+*.pyd
+engine_rs.dll
