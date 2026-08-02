@@ -1,0 +1,38 @@
+# python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.eggs/
+
+# rust
+target/
+Cargo.lock
+
+# node
+node_modules/
+package-lock.json
+
+# env + secrets
+.env
+*.pem
+*_key
+api_key
+
+# phone state
+current_model.json
+offline.json
+models/
+
+# editors / os
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# benchmarks artifacts
+bench/results/*.json
+bench/results/*.png
