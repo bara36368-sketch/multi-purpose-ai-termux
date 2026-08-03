@@ -1,4 +1,5 @@
 """Tests for cyberdeck.py — module orchestrator (status/doctor/task/link)."""
+import glob
 import json
 import os
 import subprocess
@@ -267,18 +268,84 @@ def test_swarm_spawns_agents_with_roles(tmp_path, monkeypatch):
 
     monkeypatch.setattr(subprocess, "Popen", FakeProc)
     monkeypatch.setattr(cd, "agent01_path", lambda: "agent01.py")
+    monkeypatch.setattr(cd, "_custom_swarm_agents", lambda: [])
     monkeypatch.setattr(cd, "CYBER_HOME", str(tmp_path))
     code = cd.cmd_swarm(type("A", (), {
         "task": "review the fleet", "count": 3,
         "roles": ["lead", "architect", "security"],
-        "timeout": 60, "no_learn": False}))
+        "timeout": 60, "no_learn": False,
+        "list_agents": False, "json": False, "add_agent": None,
+        "name": None, "no_swarm": False, "rm_agent": None}))
     assert code == 0
     assert len(spawned) == 3
     roles = [e.get("AGENT01_ROLE") for _, e in spawned]
     assert roles == ["lead", "architect", "security"]
-    import glob
     reports = glob.glob(str(tmp_path / "swarm" / "*.json"))
     assert len(reports) == 1
     data = json.load(open(reports[0], encoding="utf-8"))
     assert data["task"] == "review the fleet"
     assert len(data["agents"]) == 3
+
+
+def test_swarm_includes_custom_agents(tmp_path, monkeypatch):
+    spawned = []
+
+    class FakeProc:
+        def __init__(self, cmd, env=None, cwd=None, stdout=None, stderr=None, text=None, encoding=None, errors=None):
+            spawned.append((cmd, env))
+            self.returncode = 0
+
+        def communicate(self, timeout=None):
+            return "custom agent output", None
+
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(cd, "agent01_path", lambda: "agent01.py")
+    monkeypatch.setattr(cd, "CYBER_HOME", str(tmp_path))
+    monkeypatch.setattr(cd, "_custom_swarm_agents",
+                        lambda: [("agent-02", "battery-life specialist")])
+    code = cd.cmd_swarm(type("A", (), {
+        "task": "review the fleet", "count": 3,
+        "roles": ["lead", "architect", "security"],
+        "timeout": 60, "no_learn": False,
+        "list_agents": False, "json": False, "add_agent": None,
+        "name": None, "no_swarm": False, "rm_agent": None}))
+    assert code == 0
+    roles = [e.get("AGENT01_ROLE") for _, e in spawned]
+    assert roles == ["lead", "architect", "security", "agent-02"]
+    data = json.load(open(glob.glob(str(tmp_path / "swarm" / "*.json"))[0], encoding="utf-8"))
+    assert data["agents"][-1]["agent"] == "agent-02"
+    assert data["agents"][-1]["role"] == "battery-life specialist"
+
+
+def test_swarm_agent_mgr_forwards(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cd, "agent01_path", lambda: "agent01.py")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, env=None, cwd=None: (calls.append((cmd, cwd)) or type(
+            "P", (), {"returncode": 0})()))
+    arc_ = type("A", (), {
+        "list_agents": True, "json": False, "add_agent": None, "name": None,
+        "no_swarm": False, "rm_agent": None, "task": None, "count": 3,
+        "roles": None, "timeout": 60, "no_learn": False})
+    assert cd.cmd_swarm(arc_) == 0
+    cmd, cwd = calls[0]
+    assert cmd[0] == sys.executable
+    assert cmd[-2:] == ["agent01.py", "--agents"]
+
+
+def test_swarm_agent_mgr_add_agent(monkeypatch):
+    calls = []
+    monkeypatch.setattr(cd, "agent01_path", lambda: "agent01.py")
+    monkeypatch.setattr(
+        subprocess, "run",
+        lambda cmd, env=None, cwd=None: (calls.append(cmd) or type(
+            "P", (), {"returncode": 0})()))
+    args = type("A", (), {
+        "list_agents": False, "json": False, "add_agent": "be the battery guy",
+        "name": "agent-02", "no_swarm": False, "rm_agent": None,
+        "task": None, "count": 3, "roles": None, "timeout": 60, "no_learn": False})
+    assert cd.cmd_swarm(args) == 0
+    assert calls[-1][0] == sys.executable
+    assert calls[-1][1:] == ["agent01.py", "--add-agent", "be the battery guy",
+                             "--name", "agent-02"]

@@ -677,15 +677,83 @@ def _swarm_report_path():
     return os.path.join(d, time.strftime("%Y%m%d-%H%M%S.json"))
 
 
+def _custom_swarm_agents():
+    """(name, role) pairs from the agent-01 custom-agent registry that are
+    flagged for swarm inclusion. Empty when agent-01 is missing or the
+    registry has no swarm members."""
+    path = agent01_path()
+    if path is None:
+        return []
+    try:
+        proc = subprocess.run(
+            [sys.executable, path, "--agents", "--json", "--swarm-only"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            cwd=os.path.dirname(os.path.realpath(path)), timeout=60)
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0:
+        return []
+    try:
+        data = json.loads(proc.stdout)
+    except ValueError:
+        return []
+    return [(a["name"], a["role"]) for a in data.get("custom", [])]
+
+
+def cmd_agent_mgr(args):
+    """custom-agent management: --list-agents / --add-agent / --rm-agent.
+    Forwards directly to agent-01's CLI so the registry stays single-sourced."""
+    path = agent01_path()
+    if path is None:
+        print("agent-01 not found (clone it next to this repo, or set AGENT01_PATH)")
+        return 2
+    if args.list_agents:
+        cmd = [sys.executable, path, "--agents"]
+        if args.json:
+            cmd.append("--json")
+            cmd.append("--swarm-only")
+    elif args.add_agent:
+        cmd = [sys.executable, path, "--add-agent", args.add_agent]
+        if args.name:
+            cmd += ["--name", args.name]
+        if args.no_swarm:
+            cmd.append("--no-swarm")
+    elif args.rm_agent:
+        cmd = [sys.executable, path, "--rm-agent", args.rm_agent]
+    else:
+        return None
+    try:
+        proc = subprocess.run(cmd, env=dict(os.environ),
+                              cwd=os.path.dirname(os.path.realpath(path)))
+        return proc.returncode
+    except OSError as exc:
+        print("could not run agent-01: %s" % exc)
+        return 1
+
+
 def cmd_swarm(args):
     path = agent01_path()
     if path is None:
         print("agent-01 not found (clone it next to this repo, or set AGENT01_PATH)")
         print("  git clone https://github.com/bara36368-sketch/agent-01 ../agent-01")
         return 2
+    mgr = cmd_agent_mgr(args)
+    if mgr is not None:
+        return mgr
+    if not args.task:
+        print("swarm: no task given")
+        print("  python cyberdeck.py swarm '<task>'                # run the swarm")
+        print("  python cyberdeck.py swarm --list-agents           # list custom agents")
+        print("  python cyberdeck.py swarm --add-agent '<prompt>'  # create agent-02 by prompt")
+        return 1
     roles = SWARM_ROLES if args.roles is None else [
         r for r in SWARM_ROLES if r[0] in args.roles]
     roles = (roles or SWARM_ROLES)[: args.count]
+    custom = [(n, r) for n, r in _custom_swarm_agents()
+              if n not in {x[0] for x in roles}]
+    roles = roles + custom
+    if not args.roles and args.count:
+        roles = roles[: args.count]
     print("swarm: %d agents on: %s" % (len(roles), args.task))
     print("-" * 60)
     env = dict(os.environ)
@@ -764,12 +832,19 @@ def main(argv=None):
     agent.add_argument("prompt", nargs="?", default=None, help="question to ask (omitted = interactive chat)")
     agent.add_argument("--no-learn", action="store_true", help="don't record/learn from this turn")
     agent.add_argument("--chat", action="store_true", help="interactive agent-01 session")
-    swarm = sub.add_parser("swarm", help="run a dozen role-specialized agents (agent-01 lead + 11 roles)")
-    swarm.add_argument("task", help="the task to swarm")
+    swarm = sub.add_parser("swarm", help="run a dozen role-specialized agents (agent-01 lead + 11 roles + custom agents)")
+    swarm.add_argument("task", nargs="?", default=None, help="the task to swarm")
     swarm.add_argument("--count", type=int, default=12, help="max agents to spawn (default 12)")
     swarm.add_argument("--roles", nargs="*", default=None, help="subset of roles (lead architect security ...)")
     swarm.add_argument("--timeout", type=int, default=600, help="per-agent timeout (s)")
     swarm.add_argument("--no-learn", action="store_true", help="agents don't record/learn")
+    swarm.add_argument("--list-agents", action="store_true", help="list custom agents registered for swarm")
+    swarm.add_argument("--json", action="store_true", help="with --list-agents: machine-readable output")
+    swarm.add_argument("--add-agent", metavar="PROMPT", default=None,
+                       help="create a custom agent from a role prompt (auto-numbered agent-02, ...)")
+    swarm.add_argument("--name", default=None, help="with --add-agent: explicit name (e.g. agent-07)")
+    swarm.add_argument("--no-swarm", action="store_true", help="with --add-agent: keep out of swarm runs")
+    swarm.add_argument("--rm-agent", default=None, help="delete a custom agent by name")
     sub.add_parser("modules", help="list modules + entry points")
     args = p.parse_args(argv)
 

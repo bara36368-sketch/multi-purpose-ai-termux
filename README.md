@@ -42,6 +42,12 @@ python cyberdeck.py swarm "review the gateway for security holes"
                                 # 12 role-specialized agents in parallel (lead + 11 roles)
 python cyberdeck.py swarm "design the next module" --roles lead architect performance
 python cyberdeck.py swarm "quick check" --count 3              # subset
+python cyberdeck.py swarm --add-agent "you are the battery-life specialist, watch watts"
+                                # create custom agent-02 from a role prompt (auto-numbered)
+python cyberdeck.py swarm --add-agent "you hunt data-hygiene rot" --name agent-07
+python cyberdeck.py swarm --list-agents                       # registered custom agents
+python cyberdeck.py swarm --list-agents --json               # machine-readable
+python cyberdeck.py swarm --rm-agent agent-07               # delete a custom agent
 ```
 
 ### Rust fast path (optional)
