@@ -1,6 +1,7 @@
 """Tests for cyberdeck.py — module orchestrator (status/doctor/task/link)."""
 import json
 import os
+import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -251,3 +252,33 @@ def test_rust_fleet_alerts_match_python():
     assert cd.fleet_alerts(prev, cur_swap) == cd._py_fleet_alerts(prev, cur_swap)
     assert cd.fleet_alerts(prev, cur_down) == cd._py_fleet_alerts(prev, cur_down)
     assert cd.fleet_alerts(prev, prev) == []
+
+
+def test_swarm_spawns_agents_with_roles(tmp_path, monkeypatch):
+    spawned = []
+
+    class FakeProc:
+        def __init__(self, cmd, env=None, cwd=None, stdout=None, stderr=None, text=None, encoding=None, errors=None):
+            spawned.append((cmd, env))
+            self.returncode = 0
+
+        def communicate(self, timeout=None):
+            return "agent output here", None
+
+    monkeypatch.setattr(subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(cd, "agent01_path", lambda: "agent01.py")
+    monkeypatch.setattr(cd, "CYBER_HOME", str(tmp_path))
+    code = cd.cmd_swarm(type("A", (), {
+        "task": "review the fleet", "count": 3,
+        "roles": ["lead", "architect", "security"],
+        "timeout": 60, "no_learn": False}))
+    assert code == 0
+    assert len(spawned) == 3
+    roles = [e.get("AGENT01_ROLE") for _, e in spawned]
+    assert roles == ["lead", "architect", "security"]
+    import glob
+    reports = glob.glob(str(tmp_path / "swarm" / "*.json"))
+    assert len(reports) == 1
+    data = json.load(open(reports[0], encoding="utf-8"))
+    assert data["task"] == "review the fleet"
+    assert len(data["agents"]) == 3

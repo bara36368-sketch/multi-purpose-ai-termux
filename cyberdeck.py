@@ -653,6 +653,76 @@ def cmd_agent(args):
         return 1
 
 
+# ------------------------------------------------------------------ swarm
+
+SWARM_ROLES = [
+    ("lead", "Lead agent — own the answer, integrate everyone else's findings"),
+    ("architect", "System architecture — structure, layering, dependency analysis"),
+    ("code-reviewer", "Code review — bugs, correctness, edge cases, smells"),
+    ("security", "Security — auth, injection, secrets, SSRF, OWASP Top 10"),
+    ("performance", "Performance — hot paths, latency, memory, token budget"),
+    ("reliability", "Reliability — crash loops, restart storms, error handling"),
+    ("testing", "Testing — coverage gaps, flaky tests, missing cases"),
+    ("docs", "Documentation — README, comments, usage completeness"),
+    ("deploy", "Deployment — phone/Termux fit, startup, supervision"),
+    ("data", "Data — schema, journaling, backup, retention"),
+    ("ux", "UX — CLI ergonomics, messages, defaults"),
+    ("edge", "Edge advocate — challenge the plan; play devil's advocate"),
+]
+
+
+def _swarm_report_path():
+    d = os.path.join(CYBER_HOME, "swarm")
+    os.makedirs(d, exist_ok=True)
+    return os.path.join(d, time.strftime("%Y%m%d-%H%M%S.json"))
+
+
+def cmd_swarm(args):
+    path = agent01_path()
+    if path is None:
+        print("agent-01 not found (clone it next to this repo, or set AGENT01_PATH)")
+        print("  git clone https://github.com/bara36368-sketch/agent-01 ../agent-01")
+        return 2
+    roles = SWARM_ROLES if args.roles is None else [
+        r for r in SWARM_ROLES if r[0] in args.roles]
+    roles = (roles or SWARM_ROLES)[: args.count]
+    print("swarm: %d agents on: %s" % (len(roles), args.task))
+    print("-" * 60)
+    env = dict(os.environ)
+    env["AGENT01_CYBERDECK"] = os.path.abspath(__file__)
+    proc = {}
+    for name, _ in roles:
+        e = dict(env)
+        e["AGENT01_ROLE"] = name
+        cmd = [sys.executable, path, args.task]
+        if args.no_learn:
+            cmd.append("--no-learn")
+        proc[name] = subprocess.Popen(
+            cmd, env=e, cwd=os.path.dirname(path),
+            stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+            encoding="utf-8", errors="replace")
+    results = []
+    for name, role in roles:
+        out, _ = proc[name].communicate(timeout=args.timeout)
+        tail = out.strip()[-400:]
+        results.append({"agent": name, "role": role, "rc": proc[name].returncode,
+                        "output_tail": tail})
+        print("[%s] rc=%d %s" % (name, proc[name].returncode,
+                                 tail.replace("\n", " ")[:120]))
+    report = {"task": args.task, "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+              "agents": results}
+    rp = _swarm_report_path()
+    with open(rp, "w", encoding="utf-8") as f:
+        json.dump(report, f, indent=2)
+    print()
+    print("swarm report: %s" % rp)
+    print()
+    print("=== synthesis (lead) ===")
+    lead = next((r for r in results if r["agent"] == "lead"), results[0])
+    print(lead["output_tail"])
+    return 0
+
+
 def cmd_modules(args):
     for m in MODULES:
         print("%-14s %-18s %s" % (m["dir"], m["entry"], m["what"]))
@@ -694,6 +764,12 @@ def main(argv=None):
     agent.add_argument("prompt", nargs="?", default=None, help="question to ask (omitted = interactive chat)")
     agent.add_argument("--no-learn", action="store_true", help="don't record/learn from this turn")
     agent.add_argument("--chat", action="store_true", help="interactive agent-01 session")
+    swarm = sub.add_parser("swarm", help="run a dozen role-specialized agents (agent-01 lead + 11 roles)")
+    swarm.add_argument("task", help="the task to swarm")
+    swarm.add_argument("--count", type=int, default=12, help="max agents to spawn (default 12)")
+    swarm.add_argument("--roles", nargs="*", default=None, help="subset of roles (lead architect security ...)")
+    swarm.add_argument("--timeout", type=int, default=600, help="per-agent timeout (s)")
+    swarm.add_argument("--no-learn", action="store_true", help="agents don't record/learn")
     sub.add_parser("modules", help="list modules + entry points")
     args = p.parse_args(argv)
 
@@ -711,6 +787,8 @@ def main(argv=None):
         return cmd_fleet(args)
     elif args.cmd == "agent":
         return cmd_agent(args)
+    elif args.cmd == "swarm":
+        return cmd_swarm(args)
     elif args.cmd == "link":
         cmd_link(args)
     elif args.cmd == "modules":

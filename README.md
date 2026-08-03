@@ -38,6 +38,10 @@ python cyberdeck.py fleet status           # live watch: up/down flips, model sw
 python cyberdeck.py link <srt|url>   # video-brain pipeline plan
 python cyberdeck.py agent "what should I deploy next?"   # ask agent-01 (sibling repo)
 python cyberdeck.py agent --chat     # interactive agent-01 session
+python cyberdeck.py swarm "review the gateway for security holes"
+                                # 12 role-specialized agents in parallel (lead + 11 roles)
+python cyberdeck.py swarm "design the next module" --roles lead architect performance
+python cyberdeck.py swarm "quick check" --count 3              # subset
 ```
 
 ### Rust fast path (optional)
