@@ -620,6 +620,39 @@ def _fleet_loop(args, env=None):
         return 0
 
 
+# ------------------------------------------------------------------ agent
+
+def agent01_path():
+    """Path to the sibling agent-01 repo's CLI, or None."""
+    env = os.environ.get("AGENT01_PATH")
+    if env:
+        return env
+    cand = os.path.join(os.path.dirname(REPO), "agent-01", "agent01.py")
+    return cand if os.path.isfile(cand) else None
+
+
+def cmd_agent(args):
+    path = agent01_path()
+    if path is None:
+        print("agent-01 not found (clone it next to this repo, or set AGENT01_PATH)")
+        print("  git clone https://github.com/bara36368-sketch/agent-01 ../agent-01")
+        return 2
+    env = dict(os.environ)
+    env["AGENT01_CYBERDECK"] = os.path.abspath(__file__)
+    if args.chat or not args.prompt:
+        cmd = [sys.executable, path, "--chat"]
+    else:
+        cmd = [sys.executable, path, args.prompt]
+        if args.no_learn:
+            cmd.append("--no-learn")
+    try:
+        proc = subprocess.run(cmd, env=env, cwd=os.path.dirname(path))
+        return proc.returncode
+    except OSError as exc:
+        print("could not run agent-01: %s" % exc)
+        return 1
+
+
 def cmd_modules(args):
     for m in MODULES:
         print("%-14s %-18s %s" % (m["dir"], m["entry"], m["what"]))
@@ -657,6 +690,10 @@ def main(argv=None):
     fstatus.add_argument("--timeout", type=float, default=3.0)
     fstatus.add_argument("--once", action="store_true")
     fstatus.add_argument("--interval", type=int, default=5, help="poll interval (s), watch mode")
+    agent = sub.add_parser("agent", help="ask agent-01 (self-improving agent) — needs the sibling repo")
+    agent.add_argument("prompt", nargs="?", default=None, help="question to ask (omitted = interactive chat)")
+    agent.add_argument("--no-learn", action="store_true", help="don't record/learn from this turn")
+    agent.add_argument("--chat", action="store_true", help="interactive agent-01 session")
     sub.add_parser("modules", help="list modules + entry points")
     args = p.parse_args(argv)
 
@@ -672,6 +709,8 @@ def main(argv=None):
         return cmd_redo(args)
     elif args.cmd == "fleet":
         return cmd_fleet(args)
+    elif args.cmd == "agent":
+        return cmd_agent(args)
     elif args.cmd == "link":
         cmd_link(args)
     elif args.cmd == "modules":

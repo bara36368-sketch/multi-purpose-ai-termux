@@ -36,6 +36,8 @@ python cyberdeck.py fleet add g85 http://192.168.1.50:8000 --key sk-x
 python cyberdeck.py fleet status --once    # one-shot health table
 python cyberdeck.py fleet status           # live watch: up/down flips, model swaps, thermal spikes
 python cyberdeck.py link <srt|url>   # video-brain pipeline plan
+python cyberdeck.py agent "what should I deploy next?"   # ask agent-01 (sibling repo)
+python cyberdeck.py agent --chat     # interactive agent-01 session
 ```
 
 ### Rust fast path (optional)
