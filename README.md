@@ -48,6 +48,15 @@ python cyberdeck.py swarm --add-agent "you hunt data-hygiene rot" --name agent-0
 python cyberdeck.py swarm --list-agents                       # registered custom agents
 python cyberdeck.py swarm --list-agents --json               # machine-readable
 python cyberdeck.py swarm --rm-agent agent-07               # delete a custom agent
+python cyberdeck.py keys list      # free-API providers + env vars (keys masked)
+python cyberdeck.py keys add groq sk-...   # store a key in ~/.cyberdeck/keys.json
+python cyberdeck.py keys rm groq   # remove from vault (env var still works)
+python cyberdeck.py keys check     # live 1-token probe of every provider key
+python cyberdeck.py ideas          # browse the 1000-idea database (100 groups x 10)
+python cyberdeck.py ideas --show 100        # one group's 10 ideas
+python cyberdeck.py ideas --search rotation # keyword search across all ideas
+python cyberdeck.py up --json      # machine-readable status
+python cyberdeck.py sessions --grep battery # filter journal by keyword
 ```
 
 ### Rust fast path (optional)

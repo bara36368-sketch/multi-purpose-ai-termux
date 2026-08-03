@@ -349,3 +349,113 @@ def test_swarm_agent_mgr_add_agent(monkeypatch):
     assert calls[-1][0] == sys.executable
     assert calls[-1][1:] == ["agent01.py", "--add-agent", "be the battery guy",
                              "--name", "agent-02"]
+
+
+# ------------------------------------------------------------------ keys
+
+def test_mask_key_never_leaks():
+    assert cd.mask_key("sk-1234567890abcd") == "...abcd"
+    assert "sk-1234567890abcd" not in cd.mask_key("sk-1234567890abcd")
+    assert cd.mask_key("") == ""
+    assert cd.mask_key("abc") == "****"
+
+
+def test_keys_vault_roundtrip(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "KEYS_PATH", str(tmp_path / "keys.json"))
+    cd.cmd_keys(type("A", (), {"keys_cmd": "add", "provider": "groq", "key": "sk-groq-1"}))
+    assert cd.load_keys() == {"groq": "sk-groq-1"}
+    assert cd.resolve_key("groq") == "sk-groq-1"
+    assert cd.cmd_keys(type("A", (), {"keys_cmd": "rm", "provider": "groq"})) == 0
+    assert cd.load_keys() == {}
+
+
+def test_keys_unknown_provider(tmp_path, monkeypatch):
+    monkeypatch.setattr(cd, "KEYS_PATH", str(tmp_path / "keys.json"))
+    assert cd.cmd_keys(type("A", (), {"keys_cmd": "add", "provider": "nope", "key": "x"})) == 2
+
+
+def test_resolve_key_env_falls_back_to_vault(monkeypatch):
+    monkeypatch.setattr(cd, "KEYS_PATH", str(monkeypatch_fail_path()))
+    monkeypatch.setenv("GROQ_API_KEY", "env-groq-9")
+    assert cd.resolve_key("groq") == "env-groq-9"
+
+
+def test_check_key_missing(monkeypatch):
+    monkeypatch.setattr(cd, "KEYS_PATH", str(monkeypatch_fail_path()))
+    monkeypatch.delenv("GROQ_API_KEY", raising=False)
+    ok, detail = cd.check_key("groq")
+    assert ok == "missing"
+    assert "GROQ_API_KEY" in detail
+
+
+def test_check_key_auth_and_429(monkeypatch):
+    monkeypatch.setattr(cd, "KEYS_PATH", str(monkeypatch_fail_path()))
+    monkeypatch.setenv("GROQ_API_KEY", "sk-test")
+
+    def fake_urlopen(req, timeout=None):
+        import urllib.error
+        if req.full_url.endswith("/20"):
+            raise urllib.error.HTTPError(req.full_url, 429, "Rate limited", None, None)
+        raise urllib.error.HTTPError(req.full_url, 401, "Unauthorized", None, None)
+
+    monkeypatch.setattr(urllib_request(), "urlopen", fake_urlopen)
+    ok, detail = cd.check_key("groq")
+    assert ok == "AUTH" and "401" in detail
+    monkeypatch.setattr(urllib_request(), "urlopen",
+                        lambda req, timeout=None: (_ for _ in ()).throw(
+                            __import__("urllib.error").error.HTTPError(
+                                req.full_url, 429, "x", None, None)))
+    ok, _ = cd.check_key("groq")
+    assert ok == "RATE"
+
+
+# ------------------------------------------------------------------ ideas
+
+def test_parse_ideas_100_groups_1000():
+    groups = cd.parse_ideas()
+    assert len(groups) == 100
+    total = sum(len(g["ideas"]) for g in groups)
+    assert total == 1000
+    assert groups[0]["n"] == 1
+    assert groups[-1]["n"] == 100
+    assert groups[0]["title"] == "Free LLM API providers (permanent free tiers)"
+    assert len(groups[0]["ideas"]) == 10
+
+
+def test_parse_ideas_numbers_prefix():
+    groups = cd.parse_ideas()
+    for g in groups:
+        assert len(g["ideas"]) == 10
+    assert groups[0]["ideas"][0].startswith("Groq:")
+    assert groups[41]["title"] == "Structured output ideas"
+
+
+def test_cmd_ideas_show_and_search(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cd, "IDEAS_PATH", str(tmp_path.parent / "no-such-ideas.md"))
+    assert cd.cmd_ideas(type("A", (), {"show": 1, "search": None})) == 1
+    monkeypatch.setattr(cd, "IDEAS_PATH", os.path.join(os.path.dirname(os.path.abspath(__file__)), "IDEAS.md"))
+    assert cd.cmd_ideas(type("A", (), {"show": 100, "search": None})) == 0
+    out = capsys.readouterr().out
+    assert "cyberdeck keys manager" in out
+    assert cd.cmd_ideas(type("A", (), {"show": 0, "search": "rotation"})) == 0
+    assert "rotation" in capsys.readouterr().out
+
+
+# ------------------------------------------------------------------ up --json and sessions --grep
+
+def test_cmd_up_json(monkeypatch, capsys):
+    monkeypatch.setattr(cd, "_HAS_RS", False)
+    monkeypatch.setattr(cd, "_pyd_importable", lambda: "no")
+    code = cd.cmd_up(type("A", (), {"json": True}))
+    assert code is None
+    data = json.loads(capsys.readouterr().out)
+    assert len(data["modules"]) == len(cd.MODULES)
+
+
+def test_sessions_grep(tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(cd, "SESSIONS_PATH", str(tmp_path / "s.json"))
+    cd.add_session("make a reel about the trip", "video", "clip-factory", "echo a")
+    cd.add_session("battery level please", "phone", "android-mcp", "echo b")
+    cd.cmd_sessions(type("A", (), {"status": None, "grep": "battery", "limit": 10}))
+    out = capsys.readouterr().out
+    assert "battery level" in out and "reel about the trip" not in out

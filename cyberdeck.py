@@ -7,6 +7,8 @@ Usage:
     python cyberdeck.py task "<prompt>"      # natural-language dispatch to a module
     python cyberdeck.py link <path-or-url>   # video-brain pipeline plan for a source
     python cyberdeck.py modules              # list modules + entry points
+    python cyberdeck.py keys                 # free-API provider keys (vault + check)
+    python cyberdeck.py ideas                # browse the 1000-idea database (IDEAS.md)
 
 `task` uses keyword intent matching (offline, deterministic). Pass --llm to
 ask a reachable androidllm phone to classify the intent instead, with the
@@ -22,6 +24,7 @@ Imports: stdlib only (cyberdeck_rs optional). Python 3.8+.
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -32,6 +35,37 @@ REPO = os.path.dirname(os.path.abspath(__file__))
 CYBER_HOME = os.path.join(os.path.expanduser("~"), ".cyberdeck")
 SESSIONS_PATH = os.path.join(CYBER_HOME, "sessions.json")
 FLEET_PATH = os.path.join(CYBER_HOME, "fleet.json")
+KEYS_PATH = os.path.join(CYBER_HOME, "keys.json")
+IDEAS_PATH = os.path.join(REPO, "IDEAS.md")
+
+# Free-API providers from IDEAS.md Group 1-2: (name, env var, signup URL,
+# chat endpoint template, auth style, model). auth "query" puts the key in the
+# URL (?key=...), "bearer" uses Authorization, None = no automated check.
+FREE_PROVIDERS = [
+    ("groq", "GROQ_API_KEY", "https://console.groq.com/keys",
+     "https://api.groq.com/openai/v1/chat/completions", "bearer", "llama-3.3-70b-versatile"),
+    ("cerebras", "CEREBRAS_API_KEY", "https://cloud.cerebras.ai",
+     "https://api.cerebras.ai/v1/chat/completions", "bearer", "gpt-oss-120b"),
+    ("gemini", "GEMINI_API_KEY", "https://aistudio.google.com/apikey",
+     "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={key}",
+     "query", None),
+    ("mistral", "MISTRAL_API_KEY", "https://console.mistral.ai",
+     "https://api.mistral.ai/v1/chat/completions", "bearer", "open-mistral-7b"),
+    ("openrouter", "OPENROUTER_API_KEY", "https://openrouter.ai/settings/keys",
+     "https://openrouter.ai/api/v1/chat/completions", "bearer", "meta-llama/llama-3.3-70b-instruct:free"),
+    ("deepseek", "DEEPSEEK_API_KEY", "https://platform.deepseek.com",
+     "https://api.deepseek.com/chat/completions", "bearer", "deepseek-chat"),
+    ("together", "TOGETHER_API_KEY", "https://api.together.ai",
+     "https://api.together.xyz/v1/chat/completions", "bearer", "meta-llama/Llama-3.3-70B-Instruct-Turbo"),
+    ("cohere", "COHERE_API_KEY", "https://dashboard.cohere.com",
+     "https://api.cohere.com/v2/chat", "bearer", "command-r-plus"),
+    ("github", "GITHUB_TOKEN", "https://github.com/settings/tokens",
+     "https://models.inference.ai.azure.com/chat/completions", "bearer", "gpt-4o-mini"),
+    ("nvidia", "NVIDIA_NIM_API_KEY", "https://build.nvidia.com",
+     "https://integrate.api.nvidia.com/v1/chat/completions", "bearer", "meta/llama-3.3-70b-instruct"),
+]
+
+PROVIDER_BY_NAME = {p[0]: p for p in FREE_PROVIDERS}
 
 
 def _load_rs():
@@ -121,6 +155,14 @@ def status_table():
 
 
 def cmd_up(args):
+    if getattr(args, "json", False):
+        print(json.dumps({
+            "modules": status_table(),
+            "engine_rs_build": os.path.isdir(os.path.join(module_dir("engine-rs"), "target", "release")),
+            "engine_rs_importable": _pyd_importable() == "yes",
+            "cyberdeck_rs_importable": _HAS_RS,
+        }, indent=2))
+        return
     print("%-14s %-18s %-8s %s" % ("module", "entry", "entry", "tests"))
     print("-" * 60)
     for r in status_table():
@@ -431,6 +473,10 @@ def cmd_sessions(args):
     sessions = load_sessions()
     if args.status:
         sessions = [s for s in sessions if s["status"] == args.status]
+    if getattr(args, "grep", None):
+        q = args.grep.lower()
+        sessions = [s for s in sessions
+                    if q in s["prompt"].lower() or q in s.get("command", "").lower()]
     sessions = sessions[-args.limit:] if args.limit else sessions
     if not sessions:
         print("no sessions yet. run: python cyberdeck.py task \"<prompt>\" --run")
@@ -796,10 +842,198 @@ def cmd_modules(args):
         print("%-14s %-18s %s" % (m["dir"], m["entry"], m["what"]))
 
 
+# ------------------------------------------------------------------ keys
+
+def mask_key(key):
+    """Show only the last 4 chars — never print full keys (Group 3 #5, 24 #7)."""
+    if not key:
+        return ""
+    if len(key) <= 4:
+        return "****"
+    return "...%s" % key[-4:]
+
+
+def load_keys():
+    try:
+        with open(KEYS_PATH, encoding="utf-8") as f:
+            return json.load(f)
+    except (OSError, ValueError):
+        return {}
+
+
+def save_keys(keys):
+    _atomic_json(KEYS_PATH, keys)
+    try:
+        os.chmod(KEYS_PATH, 0o600)  # posix-only; ignored on Windows
+    except OSError:
+        pass
+
+
+def resolve_key(provider):
+    """Key for a provider: vault first, then env var (Group 3 #3, #9)."""
+    keys = load_keys()
+    name, env, _signup, _url, _auth, _model = PROVIDER_BY_NAME[provider]
+    if keys.get(provider):
+        return keys[provider]
+    env_key = os.environ.get(env, "") or os.environ.get("%s_API_KEY" % name.upper(), "")
+    return env_key or os.environ.get(name.upper(), "")
+
+
+def check_key(provider, timeout=6.0):
+    """Probe a provider with a 1-token request. Returns
+    (status, detail) with status in OK/401/429/ERR or None if not checkable."""
+    name, env, _signup, url, auth, model = PROVIDER_BY_NAME[provider]
+    key = resolve_key(provider)
+    if not key:
+        return ("missing", "no key (vault or %s)" % env)
+    if not url or not auth:
+        return ("nocheck", "no automated check endpoint")
+    body = None
+    req_url = url.format(key=key) if auth == "query" else url
+    headers = {"Content-Type": "application/json"}
+    if auth == "bearer":
+        headers["Authorization"] = "Bearer " + key
+    if model:
+        body = json.dumps({"model": model, "messages": [{"role": "user",
+                                                         "content": "ping"}],
+                           "max_tokens": 1}).encode("utf-8")
+    req = urllib.request.Request(req_url, data=body, headers=headers, method="POST")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return ("OK", "HTTP %d" % r.status)
+    except urllib.error.HTTPError as exc:
+        if exc.code in (401, 403):
+            return ("AUTH", "HTTP %d — key invalid/revoked" % exc.code)
+        code = exc.code
+        detail = "HTTP %d" % code
+        try:
+            err = json.loads(exc.read().decode("utf-8", "replace"))
+            de = err.get("error", {})
+            detail += " — " + str(de.get("rate_limited", de.get("message", "")))[:80]
+        except Exception:
+            pass
+        return ("RATE" if code == 429 else "ERR", detail)
+    except Exception as exc:
+        return ("ERR", str(exc)[:80])
+
+
+def cmd_keys(args):
+    sub = args.keys_cmd
+    if sub == "list":
+        print("%-12s %-10s %-30s %s" % ("provider", "source", "env var", "key"))
+        print("-" * 70)
+        for name, env, _signup, _url, _auth, _model in FREE_PROVIDERS:
+            key = resolve_key(name)
+            src = "vault" if load_keys().get(name) else ("env" if key else "none")
+            show = mask_key(key) if key else "-"
+            print("%-12s %-10s %-30s %s" % (name, src, env, show))
+        return 0
+    if sub == "add":
+        name = args.provider.lower()
+        if name not in PROVIDER_BY_NAME:
+            print("unknown provider '%s' (see: cyberdeck.py keys list)" % args.provider)
+            return 2
+        keys = load_keys()
+        keys[name] = args.key
+        save_keys(keys)
+        print("stored %s -> ~/.cyberdeck/keys.json (%s)" % (name, mask_key(args.key)))
+        return 0
+    if sub == "rm":
+        keys = load_keys()
+        if args.provider not in keys:
+            print("no stored key for %s" % args.provider)
+            return 1
+        del keys[args.provider]
+        save_keys(keys)
+        print("removed %s from vault (env var still works)" % args.provider)
+        return 0
+    if sub == "check":
+        bad = 0
+        print("%-12s %-8s %s" % ("provider", "state", "detail"))
+        print("-" * 70)
+        for name in sorted(PROVIDER_BY_NAME):
+            ok, detail = check_key(name)
+            if ok not in ("OK", "nocheck"):
+                bad += 1
+            print("%-12s %-8s %s" % (name, ok, detail))
+        print()
+        print("nocheck = no automated endpoint (add your own). %d degraded/missing" % bad)
+        return 0 if bad == 0 else 1
+    print(__doc__)
+    return 0
+
+
+# ------------------------------------------------------------------ ideas
+
+def _safe_print(text):
+    """Print UTF-8 content even on legacy consoles (cp1252 etc.): replace
+    characters the terminal can't encode instead of crashing."""
+    try:
+        print(text)
+    except UnicodeEncodeError:
+        enc = sys.stdout.encoding or "utf-8"
+        print(text.encode(enc, errors="replace").decode(enc, errors="replace"))
+
+
+def parse_ideas(path=None):
+    """Parse IDEAS.md into [{"n": 1, "title": "…", "ideas": ["…", …]}, …]."""
+    if path is None:
+        path = IDEAS_PATH
+    groups = []
+    cur = None
+    try:
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                line = raw.rstrip("\n")
+                m = re.match(r"^## Group (\d+) \u2014 (.+)$", line)
+                if m:
+                    cur = {"n": int(m.group(1)), "title": m.group(2), "ideas": []}
+                    groups.append(cur)
+                    continue
+                im = re.match(r"^\s*(\d+)\.\s+(.+)$", line)
+                if cur is not None and im:
+                    cur["ideas"].append(im.group(2))
+    except OSError:
+        return []
+    return groups
+
+
+def cmd_ideas(args):
+    groups = parse_ideas()
+    if not groups:
+        print("IDEAS.md not found next to cyberdeck.py — clone it or restore it")
+        return 1
+    if args.show:
+        g = next((x for x in groups if x["n"] == args.show), None)
+        if g is None:
+            print("no group %d (1-%d)" % (args.show, len(groups)))
+            return 1
+        print("## Group %d — %s" % (g["n"], g["title"]))
+        for i, idea in enumerate(g["ideas"], 1):
+            _safe_print("%2d. %s" % (i, idea))
+        return 0
+    if args.search:
+        q = args.search.lower()
+        hits = []
+        for g in groups:
+            for idea in g["ideas"]:
+                if q in idea.lower():
+                    hits.append((g["n"], g["title"], idea))
+        print("%d matches for %r" % (len(hits), args.search))
+        for n, title, idea in hits[:50]:
+            _safe_print("  G%-3d %-24s %s" % (n, title[:24], idea))
+        return 0
+    print("%d groups x 10 = %d ideas (from GitHub research)" % (len(groups), sum(len(g["ideas"]) for g in groups)))
+    for g in groups:
+        print("G%-3d %s" % (g["n"], g["title"]))
+    return 0
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="cyberdeck.py", description=__doc__)
     sub = p.add_subparsers(dest="cmd", required=True)
-    sub.add_parser("up", help="status table of all modules")
+    sub.add_parser("up", help="status table of all modules").add_argument(
+        "--json", action="store_true", help="machine-readable output")
     doc = sub.add_parser("doctor", help="run every module's test suite")
     doc.add_argument("--timeout", type=int, default=120, help="per-suite timeout (s)")
     task = sub.add_parser("task", help="natural-language dispatch to a module")
@@ -810,6 +1044,7 @@ def main(argv=None):
     ses = sub.add_parser("sessions", help="list recent task sessions (journal)")
     ses.add_argument("--limit", type=int, default=10)
     ses.add_argument("--status", choices=SESSION_STATUS, default=None)
+    ses.add_argument("--grep", default=None, help="filter by keyword in prompt/command")
     redo = sub.add_parser("redo", help="re-run a finished session")
     redo.add_argument("id", type=int)
     redo.add_argument("--timeout", type=int, default=300)
@@ -846,6 +1081,18 @@ def main(argv=None):
     swarm.add_argument("--no-swarm", action="store_true", help="with --add-agent: keep out of swarm runs")
     swarm.add_argument("--rm-agent", default=None, help="delete a custom agent by name")
     sub.add_parser("modules", help="list modules + entry points")
+    keys = sub.add_parser("keys", help="manage free-API provider keys (vault in ~/.cyberdeck)")
+    keysub = keys.add_subparsers(dest="keys_cmd")
+    keysub.add_parser("list", help="providers, source, env vars (keys masked)")
+    kadd = keysub.add_parser("add", help="store a key in the vault")
+    kadd.add_argument("provider")
+    kadd.add_argument("key")
+    krm = keysub.add_parser("rm", help="remove a key from the vault")
+    krm.add_argument("provider")
+    keysub.add_parser("check", help="probe each provider with a 1-token request (live)")
+    ideas = sub.add_parser("ideas", help="browse the 1000-idea database (IDEAS.md)")
+    ideas.add_argument("--show", type=int, default=0, help="show one group, e.g. --show 100")
+    ideas.add_argument("--search", default=None, help="keyword search across all ideas")
     args = p.parse_args(argv)
 
     if args.cmd == "up":
@@ -868,6 +1115,10 @@ def main(argv=None):
         cmd_link(args)
     elif args.cmd == "modules":
         cmd_modules(args)
+    elif args.cmd == "keys":
+        return cmd_keys(args)
+    elif args.cmd == "ideas":
+        return cmd_ideas(args)
     return 0
 
 
